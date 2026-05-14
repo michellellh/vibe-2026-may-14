@@ -73,6 +73,7 @@ customElements.define('theme-toggle', ThemeToggle);
 class LottoGenerator extends HTMLElement {
   constructor() {
     super();
+    this.currentNumbers = [];
     const shadow = this.attachShadow({ mode: 'open' });
 
     const wrapper = document.createElement('div');
@@ -84,13 +85,50 @@ class LottoGenerator extends HTMLElement {
     const numbersContainer = document.createElement('div');
     numbersContainer.setAttribute('class', 'numbers');
 
+    const controls = document.createElement('div');
+    controls.setAttribute('class', 'controls');
+
     const button = document.createElement('button');
     button.textContent = 'Generate Numbers';
     button.addEventListener('click', () => this.generateNumbers(numbersContainer));
 
+    const audioControls = document.createElement('div');
+    audioControls.setAttribute('class', 'audio-controls');
+
+    const langSelect = document.createElement('select');
+    langSelect.setAttribute('aria-label', 'Select Language');
+    const languages = [
+        { value: 'en', label: 'English' },
+        { value: 'zh-CN', label: 'Mandarin' },
+        { value: 'zh-nan', label: 'Teochew' }
+    ];
+    languages.forEach(lang => {
+        const option = document.createElement('option');
+        option.value = lang.value;
+        option.textContent = lang.label;
+        langSelect.appendChild(option);
+    });
+    // Load saved language
+    langSelect.value = localStorage.getItem('tts-lang') || 'en';
+    langSelect.addEventListener('change', () => {
+        localStorage.setItem('tts-lang', langSelect.value);
+    });
+
+    const speakButton = document.createElement('button');
+    speakButton.setAttribute('class', 'secondary-button');
+    speakButton.setAttribute('aria-label', 'Read numbers aloud');
+    speakButton.textContent = '🔊 Hear';
+    speakButton.addEventListener('click', () => this.speakNumbers(langSelect.value));
+
+    audioControls.appendChild(langSelect);
+    audioControls.appendChild(speakButton);
+
+    controls.appendChild(button);
+    controls.appendChild(audioControls);
+
     wrapper.appendChild(title);
     wrapper.appendChild(numbersContainer);
-    wrapper.appendChild(button);
+    wrapper.appendChild(controls);
 
     const style = document.createElement('style');
     style.textContent = `
@@ -146,17 +184,45 @@ class LottoGenerator extends HTMLElement {
       .number:hover {
         transform: scale(1.1) translateY(-5px);
       }
+      .controls {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        width: 100%;
+      }
+      .audio-controls {
+        display: flex;
+        gap: 10px;
+        width: 100%;
+      }
+      select {
+        flex: 1;
+        padding: 10px;
+        border-radius: 12px;
+        border: 2px solid var(--accent-color);
+        background: var(--card-bg);
+        color: var(--text-color);
+        font-weight: 600;
+        cursor: pointer;
+      }
       button {
-        padding: 15px 30px;
+        flex: 1;
+        padding: 15px 25px;
         border: none;
         border-radius: 12px;
         background-color: var(--accent-color);
         color: var(--button-text);
         cursor: pointer;
-        font-size: 1.1em;
+        font-size: 1em;
         font-weight: 600;
         box-shadow: 0 4px 12px oklch(0 0 0 / 0.1);
         transition: all 0.2s ease;
+      }
+      button.secondary-button {
+        flex: 0 0 auto;
+        background-color: var(--card-bg);
+        color: var(--text-color);
+        border: 2px solid var(--accent-color);
       }
       button:hover {
         transform: translateY(-2px);
@@ -179,15 +245,62 @@ class LottoGenerator extends HTMLElement {
     while (numbers.size < 6) {
       numbers.add(Math.floor(Math.random() * 49) + 1);
     }
-    const sortedNumbers = [...numbers].sort((a, b) => a - b);
+    this.currentNumbers = [...numbers].sort((a, b) => a - b);
     
-    sortedNumbers.forEach((number, index) => {
+    this.currentNumbers.forEach((number, index) => {
       const numberEl = document.createElement('div');
       numberEl.setAttribute('class', 'number');
       numberEl.style.animationDelay = `${index * 0.1}s`;
       numberEl.textContent = number;
       container.appendChild(numberEl);
     });
+  }
+
+  speakNumbers(lang) {
+    if (!('speechSynthesis' in window)) {
+        alert("Sorry, your browser doesn't support text to speech.");
+        return;
+    }
+
+    window.speechSynthesis.cancel();
+    
+    let text = "";
+    let utteranceLang = lang;
+
+    if (lang === 'en') {
+        text = `Your lottery numbers are: ${this.currentNumbers.join(', ')}`;
+    } else if (lang === 'zh-CN') {
+        text = `您的开奖号码是：${this.currentNumbers.join('，')}`;
+    } else if (lang === 'zh-nan') {
+        // Teochew is a Min Nan language. zh-TW (Taiwanese Hokkien) is a very close relative.
+        // We avoid zh-HK (Cantonese) as it is linguistically distinct.
+        text = `您的号数是：${this.currentNumbers.join('，')}`;
+        utteranceLang = 'zh-TW'; 
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = utteranceLang;
+    utterance.rate = 0.7; // Even slower for dialect clarity
+
+    // Try to find the best voice
+    const voices = window.speechSynthesis.getVoices();
+    if (lang === 'zh-nan') {
+        // Prioritize voices that are explicitly Min Nan or Taiwanese (Hokkien)
+        const bestVoice = voices.find(v => v.lang === 'zh-TW' || v.lang === 'zh-nan') || 
+                          voices.find(v => v.lang.includes('zh-TW'));
+        if (bestVoice) {
+            utterance.voice = bestVoice;
+        } else {
+            // If no Min Nan/Hokkien voice, Mandarin (zh-CN) is actually a better fallback than Cantonese
+            const mandarinVoice = voices.find(v => v.lang.includes('zh-CN'));
+            if (mandarinVoice) utterance.voice = mandarinVoice;
+        }
+    } else {
+        const bestVoice = voices.find(v => v.lang.startsWith(lang));
+        if (bestVoice) utterance.voice = bestVoice;
+    }
+
+    window.speechSynthesis.speak(utterance);
   }
 }
 
